@@ -796,7 +796,7 @@ def generate_filenames(
     ]
     # Construct the injection filenames using the hashes
     injection_file_names = [
-        Path(data_directory) / f"injection_data_{injection_hash}.hdf5" 
+        Path(data_directory) / f"injection_data_{injection_hash}" 
         for injection_hash in injection_hashes
     ]
 
@@ -963,10 +963,6 @@ def get_ifo_data(
             order
         )
     
-    print(len(valid_segments))
-    
-    quit()
-    
     batch_index = 0
     injection_indicies = [0] * len(injection_configs)
     
@@ -1064,7 +1060,7 @@ def get_ifo_data(
                 max_segment_index = num_batches_per_file // max_batch_count
                 injection_file_index = int(segment_index // max_segment_index)
                 
-                file_name = f"{file_name}_{injection_file_index}"
+                file_name = f"{file_name}_{injection_file_index}.hdf5"
                 
                 injection_key = \
                     f"injections/injections_{segment_index}"\

@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from .dataset import get_ifo_data_generator, get_ifo_data, O3
 from .setup import setup_cuda, find_available_GPUs
 from bokeh.plotting import figure, output_file, show, save
@@ -95,7 +98,14 @@ def test_noise():
             if (i > 32*100):
                 break
                 
-def plot_spectrogram(time_series, sample_rate_hertz, nperseg=128, noverlap=64, file_name='spectrogram.png'):
+def plot_spectrogram(
+        time_series, 
+        sample_rate_hertz,
+        nperseg=128, 
+        noverlap=64, 
+        file_path = Path('spectrogram.png')
+    ):
+    
     # Calculate the spectrogram
     f, t, Sxx = spectrogram(time_series, fs=sample_rate_hertz, nperseg=nperseg, noverlap=noverlap)
 
@@ -120,11 +130,21 @@ def plot_spectrogram(time_series, sample_rate_hertz, nperseg=128, noverlap=64, f
 
     # Add a colorbar
     plt.colorbar(format='%+2.0f dB')
-
+    
+    # Check plot directory exists:
+    os.makedirs(file_path.parent, exist_ok=True)
+    
     # Save the figure to a file
-    plt.savefig(file_name)
+    plt.savefig(file_path)
                 
-def plot_time_series(onsource, injections, sample_rate_hertz, onsource_duration_seconds, file_name='bokeh_plot.html'):
+def plot_time_series(
+    onsource, 
+    injections, 
+    sample_rate_hertz, 
+    onsource_duration_seconds, 
+    file_path = Path('bokeh_plot.html')
+    ):
+    
     # Infer time axis from onsource_duration and sample rate
     time_axis = np.linspace(0, onsource_duration_seconds, onsource.shape[-1])
         
@@ -135,9 +155,6 @@ def plot_time_series(onsource, injections, sample_rate_hertz, onsource_duration_
     # Preparing the data
     source = ColumnDataSource(data=dict(time=time_axis, onsource=onsource_first, injections=injections_first))
 
-    # Prepare the output file (HTML)
-    output_file(file_name)
-
     # Create a new plot with a title and axis labels
     p = figure(title="Onsource and Injections over time", x_axis_label='Time (seconds)', y_axis_label='Amplitude')
 
@@ -146,7 +163,13 @@ def plot_time_series(onsource, injections, sample_rate_hertz, onsource_duration_
 
     # Add a line renderer for 'injections', line color set to red
     p.line('time', 'injections', source=source, line_width=2, line_color="red", legend_label="Injections")
-
+    
+    # Check plot directory exists:
+    os.makedirs(file_path.parent, exist_ok=True)
+    
+    # Prepare the output file (HTML)
+    output_file(file_path)
+    
     # Save the result to HTML file
     save(p)
                 
@@ -216,14 +239,14 @@ def test_injection():
             data[1]['injections'][0].numpy(), 
             sample_rate_hertz, 
             duration_seconds, 
-            file_name='./py_ml_data/injection_test.html'
+            file_path = Path('./py_ml_data/injection_test.html')
         )
         plot_spectrogram(
             data[0]['onsource'][0].numpy(), 
             sample_rate_hertz, 
             nperseg=256, 
             noverlap=128, 
-            file_name='./py_ml_data/spectrogram.png'
+            file_path = Path('./py_ml_data/spectrogram.png')
         )
         
     ifo_data_generator = get_ifo_data_generator(
@@ -235,6 +258,7 @@ def test_injection():
         onsource_duration_seconds = duration_seconds,
         max_segment_size = 3600,
         num_examples_per_batch = 32,
+        force_generation = True,
         order = "random",
         apply_whitening = True,
         input_keys = ["onsource"], 
@@ -246,7 +270,7 @@ def test_injection():
     num_test = int(num_test)
     
     ifo_data_generator = ifo_data_generator.take(num_test)
-    for data in tqdm(islice(ifo_data_generator, num_test)):
+    for data in tqdm(islice(ifo_data_generator, num_test), total=num_test):
         pass
     
     print("Complete!")
@@ -254,7 +278,7 @@ def test_injection():
 if __name__ == "__main__":
     
     gpus = find_available_GPUs(10000, 1)
-    setup_cuda("0", max_memory_limit = 2000, verbose = True)    
+    setup_cuda(gpus, max_memory_limit = 2000, verbose = True)    
     test_injection()
     #test_noise()
 

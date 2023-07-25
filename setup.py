@@ -71,7 +71,6 @@ def setup_cuda(device_num: str, max_memory_limit: int, verbose: bool = False) ->
     # Return the MirroredStrategy instance.
     return strategy
 
-
 def find_available_GPUs(
     min_memory_MB : int, 
     max_needed : int = -1
