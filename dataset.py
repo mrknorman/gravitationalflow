@@ -82,6 +82,8 @@ class IFOData:
             self.data = tf.convert_to_tensor(self.data.value, dtype=tf.float32)
         elif (type(self.data) == np.ndarray):
             self.data = tf.convert_to_tensor(self.data, dtype=tf.float32)
+        
+        self.data = replace_nan_and_inf_with_zero(self.data)
                     
         self.duration = \
             tf.cast(tf.shape(self.data)[0], tf.float32) / self.sample_rate
@@ -144,7 +146,12 @@ def random_subsection(
 
         return batch_subarrays, batch_background_chunks, t0_subsections
 
-    
+@tf.function
+def replace_nan_and_inf_with_zero(tensor):
+    tensor = tf.where(tf.math.is_nan(tensor), tf.zeros_like(tensor), tensor)
+    tensor = tf.where(tf.math.is_inf(tensor), tf.zeros_like(tensor), tensor)
+    return tensor    
+
 def get_segment_times(
     start: float,
     stop: float,
@@ -429,13 +436,11 @@ def load_generate_injections(
     snrs = []
     
     injection_masks_key = f"injections/masks/{injection_key}"
-    snr_key = f"injections/snrs/{injection_key}"
     with open_hdf5_file(injection_filename) as injection_file:
 
         if injection_key in injection_file:
             injection_masks = injection_file[injection_masks_key][()]
             injections = injection_file[injection_key][()]
-            snrs = injection_file[snr_key][()]
         else:
             injection_masks = np.random.choice(
                 [False, True], 
@@ -452,20 +457,20 @@ def load_generate_injections(
                 injection *= 10.0E20 
                 injections.append(injection[:, 1])
                 
-                if type(config["snr"]) == np.ndarray:  
-                    snr = config["snr"][-1]
-                    if i < len(config["snr"]):
-                        snr = config["snr"][i]
-                elif type(config["snr"]) == dict:
-                    snr = randomise_dict(config["snr"])
-                else:
-                    raise ValueError("Unsupported SNR type!") 
-                    
-                snrs.append(snr)
-                
             injection_file.create_dataset(injection_key, data=np.stack(injections))
             injection_file.create_dataset(injection_masks_key, data=np.array(injection_masks))
-            injection_file.create_dataset(snr_key, data=np.array(snrs))
+        
+    for _ in range(np.sum(injection_masks)):
+        if type(config["snr"]) == np.ndarray:  
+            snr = config["snr"][-1]
+            if i < len(config["snr"]):
+                snr = config["snr"][i]
+        elif type(config["snr"]) == dict:
+            snr = randomise_dict(config["snr"])
+        else:
+            raise ValueError("Unsupported SNR type!") 
+
+        snrs.append(snr)         
 
     crop_duration = fduration / 2.0
 
@@ -886,7 +891,7 @@ def generate_filenames(
     # Generate the hashes for the injection configurations    
     injection_hashes = [ 
         generate_hash_from_list( 
-            get_sorted_values(config['args']) + [seed]
+            get_sorted_values(config['args']) + [seed] + [config['injection_chance']]
         ) 
         for config in injection_configs
     ]
@@ -1247,7 +1252,7 @@ def get_ifo_data(
                 if 'injections' in input_keys:
                     input_dict['injections'] = cropped_injections
                 if 'snr' in input_keys:
-                    input_dict['snr'] = snrs[batch_index]
+                    input_dict['snr'] = snrs[0][batch_index]
                     
                 ouput_dict = {}
                 if 'onsource' in output_keys:
@@ -1261,7 +1266,7 @@ def get_ifo_data(
                 if 'injections' in output_keys:
                     ouput_dict['injections'] = cropped_injections
                 if 'snr' in output_keys:
-                    ouput_dict['snr'] = snrs[batch_index]
+                    ouput_dict['snr'] = snrs[0][batch_index]
                                 
                 yield (input_dict, ouput_dict)
 
