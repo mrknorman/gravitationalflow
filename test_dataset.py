@@ -242,11 +242,15 @@ def test_injection():
         save_segment_data = True
     )
     
-    ifo_data_generator = ifo_data_generator.take(100)
-    for data in tqdm(islice(ifo_data_generator, 100)):
+    num_test = 1.0E7
+    num_test = int(num_test)
+    
+    ifo_data_generator = ifo_data_generator.take(num_test)
+    for data in tqdm(islice(ifo_data_generator, num_test)):
         pass
+    
+    print("Complete!")
 
-                
 if __name__ == "__main__":
     
     gpus = find_available_GPUs(10000, 1)

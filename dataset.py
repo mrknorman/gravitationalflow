@@ -315,107 +315,6 @@ def roll_vector_zero_padding(tensor, min_roll, max_roll):
         lambda vec: roll_vector_zero_padding_(vec, min_roll, max_roll), tensor
     )
 
-def _int64_feature(value):
-    """Returns an int64_list from a bool / enum / int / uint."""
-    if not isinstance(value, list):
-        value = [value]
-    return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
-
-def _bytes_feature(value):
-    """Returns a bytes_list from a string / byte."""
-    if isinstance(value, type(tf.constant(0))):
-        value = value.numpy() # BytesList won't unpack a string from an EagerTensor.
-    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
-
-def serialize_example(injection, injection_mask, snr):
-    feature = {
-        'injection': _bytes_feature(tf.io.serialize_tensor(injection)),
-        'injection_mask': _int64_feature(injection_mask),
-        'snr': _bytes_feature(tf.io.serialize_tensor(snr))
-    }
-    example_proto = tf.train.Example(features=tf.train.Features(feature=feature))
-    return example_proto.SerializeToString()
-
-def parse_tfrecord(tfrecord):
-    feature_description = {
-        'injection': tf.io.FixedLenFeature([], tf.string),
-        'injection_mask': tf.io.FixedLenFeature([], tf.int64),
-        'snr': tf.io.FixedLenFeature([], tf.string)
-    }
-    example = tf.io.parse_single_example(tfrecord, feature_description)
-    
-    injection = tf.io.parse_tensor(example['injection'], out_type = tf.float32)
-    injection_mask = example['injection_mask']
-    snr = tf.io.parse_tensor(example['snr'], out_type = tf.float32)
-    
-    return injection, injection_mask, snr
-
-
-def load_generate_injections_(
-    config: Dict[str, Any],
-    num_injections: int, 
-    injection_filename: str,
-    common_args: dict,
-    fduration: float,
-    sample_rate_hertz: float,
-    onsource_duration_seconds: float,
-    num_examples_per_batch: int
-    ):
-
-    config["args"].update(common_args)
-    injection_chance = config["injection_chance"]
-
-    injections = []
-    injection_masks = []
-    snrs = []
-
-    if tf.io.gfile.exists(injection_filename):
-        # Load data from tfrecord file
-        raw_dataset = tf.data.TFRecordDataset(injection_filename)
-        parsed_dataset = raw_dataset.map(parse_tfrecord)
-        for injection, injection_mask, snr in parsed_dataset:
-            injections.append(injection)
-            injection_masks.append(injection_mask)
-            snrs.append(snr)
-
-    else:
-        # Generate data and save to tfrecord file
-        injection_masks = np.random.choice(
-            [False, True],
-            size=num_injections,
-            p=[1 - injection_chance, injection_chance]
-        )
-
-        with tf.io.TFRecordWriter(injection_filename) as writer:
-            for _ in range(np.sum(injection_masks)):
-                injection, injection_parameters = randomise_arguments(config["args"], generate_phenom)
-                injection *= 10.0E20 
-
-                # More code here...
-
-                example = serialize_example(injection, injection_mask, snr)
-                writer.write(example)
-
-    crop_duration = fduration / 2.0
-    min_roll_num_samples = int((crop_duration + config["padding_seconds"]["back"])*sample_rate_hertz)
-    max_roll_num_samples = int((onsource_duration_seconds + fduration) *sample_rate_hertz) - int((crop_duration + config["padding_seconds"]["front"])*sample_rate_hertz)
-
-    injections = tf.stack(injections)
-    injection_masks = tf.stack(injection_masks)
-    snrs = tf.stack(snrs)
-
-    injections = roll_vector_zero_padding(injections, min_roll_num_samples, max_roll_num_samples)
-    injections = expand_tensor(injections, injection_masks)
-    snrs = expand_tensor(snrs, injection_masks)
-
-    injections = batch_tensor(injections, num_examples_per_batch)
-    injection_masks = batch_tensor(injection_masks, num_examples_per_batch)
-    snrs = batch_tensor(snrs, num_examples_per_batch)
-
-    return injections, injection_masks, snrs
-        
-        
-
 def load_generate_injections(
     config: Dict[str, Any],
     num_injections: int, 
@@ -460,7 +359,7 @@ def load_generate_injections(
             injection_file.create_dataset(injection_key, data=np.stack(injections))
             injection_file.create_dataset(injection_masks_key, data=np.array(injection_masks))
         
-    for _ in range(np.sum(injection_masks)):
+    for i in range(np.sum(injection_masks)):
         if type(config["snr"]) == np.ndarray:  
             snr = config["snr"][-1]
             if i < len(config["snr"]):
@@ -1066,7 +965,7 @@ def get_ifo_data(
     with open_hdf5_file(segment_filename) as segment_file:
         
         segment_file.require_group("segments")
-        for current_segment_start, current_segment_end in valid_segments:
+        for segment_index, (current_segment_start, current_segment_end) in enumerate(valid_segments):
             
             segment_key = \
                 f"segments/segment_{current_segment_start}_{current_segment_end}"
@@ -1125,6 +1024,12 @@ def get_ifo_data(
             
             current_segment_data = current_segment_data.scale(scale_factor)   
             
+            max_batch_count = \
+                int(
+                    max_segment_size
+                    / (saturation * num_examples_per_batch)
+                )
+            
             current_max_batch_count = \
                 int(
                       (current_segment_end - current_segment_start) 
@@ -1148,8 +1053,14 @@ def get_ifo_data(
             snrs = []
             for config, file_name in zip(injection_configs, injection_filenames):    
                 
+                num_batches_per_file = int(1.0E5)
+                max_segment_index = num_batches_per_file // max_batch_count
+                injection_file_index = int(segment_index // max_segment_index)
+                
+                file_name = f"{file_name}_{injection_file_index}"
+                
                 injection_key = \
-                    f"injections/injections_{current_segment_start}_{current_segment_end}"\
+                    f"injections/injections_{segment_index}"\
                     f"_{current_max_batch_count*num_examples_per_batch}"
     
                 injections_, injection_masks_, snrs_ = \
