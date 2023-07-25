@@ -927,14 +927,18 @@ def get_ifo_data(
             data_quality
         )
     
+    max_segments_per_file = 1.0E6 
+    
     segment_parameters = \
         [
             frame_type, 
             channel, 
             state_flag, 
+            str(max_segment_size),
             str(data_labels), 
             sample_rate_hertz
         ]  
+    
     segment_filename, injection_filenames = \
         generate_filenames(
             data_directory,         
@@ -958,6 +962,10 @@ def get_ifo_data(
             offsource_duarion_seconds,
             order
         )
+    
+    print(len(valid_segments))
+    
+    quit()
     
     batch_index = 0
     injection_indicies = [0] * len(injection_configs)
@@ -1022,8 +1030,7 @@ def get_ifo_data(
                     )
             print("Complete!")
             
-            current_segment_data = current_segment_data.scale(scale_factor)   
-            
+            current_segment_data = current_segment_data.scale(scale_factor)  
             max_batch_count = \
                 int(
                     max_segment_size
