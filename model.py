@@ -224,7 +224,6 @@ class BetaPrime(tfb.Bijector):
     def _inverse_log_det_jacobian(self, y):
         return - tf.math.log1p(y)
 
-
 class IndependentBetaPrime(tfpl.DistributionLambda):
     """An independent Beta prime Keras layer."""
     def __init__(self,

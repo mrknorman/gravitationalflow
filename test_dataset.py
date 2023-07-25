@@ -147,13 +147,9 @@ def plot_time_series(
     
     # Infer time axis from onsource_duration and sample rate
     time_axis = np.linspace(0, onsource_duration_seconds, onsource.shape[-1])
-        
-    # Take the first example from the batches
-    onsource_first = onsource[0]
-    injections_first = injections[0]
 
     # Preparing the data
-    source = ColumnDataSource(data=dict(time=time_axis, onsource=onsource_first, injections=injections_first))
+    source = ColumnDataSource(data=dict(time=time_axis, onsource=onsource, injections=injections))
 
     # Create a new plot with a title and axis labels
     p = figure(title="Onsource and Injections over time", x_axis_label='Time (seconds)', y_axis_label='Amplitude')
@@ -182,7 +178,7 @@ def test_injection():
         {
             "type" : "cbc",
             "snr"  : {"value" : 50, "distribution_type": "constant", "dtype" : int},
-            "injection_chance" : 1.0,
+            "injection_chance" : 0.5,
             "padding_seconds" : {"front" : 0.2, "back" : 0.1},
             "args" : {
                 "approximant_enum" : \
@@ -228,27 +224,60 @@ def test_injection():
         force_generation = True,
         apply_whitening = True,
         input_keys = ["onsource"], 
-        output_keys = ["injections"],
+        output_keys = ["injections", "injection_masks"],
         save_segment_data = True,
     )
     
+    exit_count = 0
     for data in islice(ifo_data_generator, 1):
         
-        plot_time_series(
-            data[0]['onsource'].numpy(), 
-            data[1]['injections'][0].numpy(), 
-            sample_rate_hertz, 
-            duration_seconds, 
-            file_path = Path('./py_ml_data/injection_test.html')
-        )
-        plot_spectrogram(
-            data[0]['onsource'][0].numpy(), 
-            sample_rate_hertz, 
-            nperseg=256, 
-            noverlap=128, 
-            file_path = Path('./py_ml_data/spectrogram.png')
-        )
-        
+        for onsource, injection, mask in zip(
+                data[0]['onsource'].numpy(), 
+                data[1]['injections'][0].numpy(),
+                data[1]['injection_masks'][0].numpy()
+            ):
+            
+            if mask and not exit_count:
+                
+                plot_time_series(
+                    onsource, 
+                    injection, 
+                    sample_rate_hertz, 
+                    duration_seconds, 
+                    file_path = Path('./py_ml_data/injection_test.html')
+                )
+                plot_spectrogram(
+                    onsource, 
+                    sample_rate_hertz, 
+                    nperseg=256, 
+                    noverlap=128, 
+                    file_path = Path('./py_ml_data/injection_spectrogram.png')
+                )
+                
+                exit_count += 1
+                
+            elif not mask and exit_count:
+                
+                plot_time_series(
+                    onsource, 
+                    injection, 
+                    sample_rate_hertz, 
+                    duration_seconds, 
+                    file_path = Path('./py_ml_data/noise_test.html')
+                )
+                plot_spectrogram(
+                    onsource, 
+                    sample_rate_hertz, 
+                    nperseg=256, 
+                    noverlap=128, 
+                    file_path = Path('./py_ml_data/noise_spectrogram.png')
+                )
+                
+                exit_count += 1
+                
+            if (exit_count >= 2):
+                break
+    
     ifo_data_generator = get_ifo_data_generator(
         time_interval = O3,
         data_labels = ["noise", "glitches"],
@@ -266,7 +295,7 @@ def test_injection():
         save_segment_data = True
     )
     
-    num_test = 1.0E7
+    num_test = 1.0E3
     num_test = int(num_test)
     
     ifo_data_generator = ifo_data_generator.take(num_test)

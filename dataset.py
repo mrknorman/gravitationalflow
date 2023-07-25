@@ -1090,7 +1090,10 @@ def get_ifo_data(
                 snrs.append(
                     snrs_
                 )
-
+                
+            injection_masks = tf.stack(injection_masks)
+            snrs = tf.stack(snrs)
+            
             for batch_index in range(current_max_batch_count):
                 
                 num_onsource_samples = \
@@ -1112,7 +1115,8 @@ def get_ifo_data(
                     )
                 
                 cropped_injections = []
-                for injection_index, config in enumerate(injection_configs):                    
+                for injection_index, config in enumerate(injection_configs):
+                                        
                     scaled_injections = \
                         scale_to_snr(
                             injections[injection_index][batch_index], 
@@ -1123,6 +1127,9 @@ def get_ifo_data(
                             fft_duration_seconds=1.0,
                             overlap_duration_seconds=0.5
                         )
+                    
+                    scaled_injections = \
+                        replace_nan_and_inf_with_zero(scaled_injections)
                     
                     batched_onsource += scaled_injections
 
@@ -1153,36 +1160,23 @@ def get_ifo_data(
                     onsource_duration_seconds, 
                     sample_rate_hertz
                 )
-                 
-                input_dict = {}
-                if 'onsource' in input_keys:
-                    input_dict['onsource'] = tf.cast(batched_onsource, tf.float16)
-                if 'offsource' in input_keys:
-                    input_dict['offsource'] = \
-                        tf.cast(batched_offsource, tf.float16)
-                if 'gps_time' in input_keys:
-                    input_dict['gps_time'] = \
-                        tf.convert_to_tensor(batched_gps_times, dtype=tf.int64)
-                if 'injections' in input_keys:
-                    input_dict['injections'] = cropped_injections
-                if 'snr' in input_keys:
-                    input_dict['snr'] = snrs[0][batch_index]
-                    
-                ouput_dict = {}
-                if 'onsource' in output_keys:
-                    ouput_dict['onsource'] = tf.cast(batched_onsource, tf.float16)
-                if 'offsource' in output_keys:
-                    ouput_dict['offsource'] = \
-                        tf.cast(batched_offsource, tf.float16)
-                if 'gps_time' in output_keys:
-                    ouput_dict['gps_time'] = \
-                        tf.convert_to_tensor(batched_gps_times, dtype=tf.int64)
-                if 'injections' in output_keys:
-                    ouput_dict['injections'] = cropped_injections
-                if 'snr' in output_keys:
-                    ouput_dict['snr'] = snrs[0][batch_index]
                                 
-                yield (input_dict, ouput_dict)
+                def create_dict(keys, batch_index=None):
+                    operations = {
+                        'onsource': lambda: tf.cast(batched_onsource, tf.float16),
+                        'offsource': lambda: tf.cast(batched_offsource, tf.float16),
+                        'gps_time': lambda: tf.convert_to_tensor(batched_gps_times, dtype=tf.int64),
+                        'injections': lambda: cropped_injections,
+                        'injection_masks': lambda: injection_masks[:, batch_index],
+                        'snr': lambda: snrs[:, batch_index]
+                    }
+
+                    return {key: operations[key]() for key in keys if key in operations}
+
+                input_dict = create_dict(input_keys, batch_index)
+                output_dict = create_dict(output_keys, batch_index)
+                                
+                yield (input_dict, output_dict)
 
 def get_ifo_data_generator(
     time_interval: Union[tuple, ObservingRun], 
@@ -1204,48 +1198,50 @@ def get_ifo_data_generator(
     **kwargs  # Capture all other arguments
     ):
     
+    num_examples_per_batch = kwargs.get('num_examples_per_batch', 1)
+    num_onsource_samples = int(kwargs.get('onsource_duration_seconds', 1.0)*sample_rate_hertz)
+    num_offsource_samples = int(kwargs.get('offsource_duration_seconds', 16.0)*sample_rate_hertz)
+    num_injection_configs = len(kwargs.get('injection_configs', {}))
+    
     output_signature_dict = {
         'onsource'       : \
             tf.TensorSpec(
-                shape=(
-                    kwargs.get('num_examples_per_batch', 1), 
-                    int(
-                        kwargs.get('onsource_duration_seconds', 1.0)
-                        *sample_rate_hertz
-                    )
-                ), 
+                shape=(num_examples_per_batch, num_onsource_samples), 
                 dtype=tf.float16
             ),
         'offsource' : \
             tf.TensorSpec(
-                shape=(
-                    kwargs.get('num_examples_per_batch', 1), 
-                    int(kwargs.get('offsource_duarion_seconds', 16.0)
-                    *sample_rate_hertz)
-                ), 
+                shape=(num_examples_per_batch, num_offsource_samples), 
                 dtype=tf.float16
             ),
         'gps_time' : 
             tf.TensorSpec(
-                shape=(
-                    kwargs.get('num_examples_per_batch', 1)
-                ), 
+                shape=(num_examples_per_batch), 
                 dtype=tf.int64
             ),
         'injections' : 
             tf.TensorSpec(
                 shape=(
-                    len(kwargs.get('injection_configs', {})), 
-                    kwargs.get('num_examples_per_batch', 1), 
-                    int(kwargs.get('onsource_duration_seconds', 1.0)
-                        *sample_rate_hertz)
+                    num_injection_configs, 
+                    num_examples_per_batch, 
+                    num_onsource_samples
                 ), 
                 dtype=tf.float16
             ),
+        'injection_masks' : 
+            tf.TensorSpec(
+                shape=(
+                    num_injection_configs, 
+                    num_examples_per_batch
+                ), 
+                dtype=tf.bool
+            ),
+        
         'snr' : 
             tf.TensorSpec(
                 shape=(
-                    kwargs.get('num_examples_per_batch', 1)
+                    num_injection_configs,
+                    num_examples_per_batch
                 ), 
                 dtype=tf.float64
             ),
