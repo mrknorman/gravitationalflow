@@ -12,7 +12,12 @@ import gravyflow as gf
 
 def validate_noise_settings(
         noise_obtainer: gf.NoiseObtainer, 
-        variables_to_return: List[Union[gf.gf.WaveformParameters, gf.ReturnVariables]]
+        variables_to_return: List[
+            Union[
+                gf.gf.WaveformParameters, 
+                gf.ReturnVariables
+            ]
+        ]
     ) -> None:
     """
     Validates noise settings and emits warnings or errors as appropriate.
@@ -35,7 +40,8 @@ def validate_noise_settings(
         
         if noise_obtainer.ifo_data_obtainer is not None:
             warn(
-                "Noise is not REAL or PSEUDO-REAL, yet data obtainer is defined.", 
+                ("Noise is not REAL or PSEUDO-REAL, yet data obtainer is"
+                 " defined."), 
                 UserWarning
             )
             
@@ -91,12 +97,18 @@ def data(
         noise_obtainer : gf.NoiseObtainer = None,
         group : str = "train",
         # Injections:
-        injection_generators: List[Union[gf.cuPhenomDGenerator, gf.WNBGenerator]] = None, 
+        injection_generators: List[
+            Union[gf.cuPhenomDGenerator, gf.WNBGenerator]
+        ] = None, 
         num_examples_per_generation_batch : int = 2048,
         # Output configuration:
         num_examples_per_batch: int = 1,
-        input_variables : List[Union[gf.gf.WaveformParameters, gf.ReturnVariables]] = None,
-        output_variables : List[Union[gf.gf.WaveformParameters, gf.ReturnVariables]] = None
+        input_variables : List[
+            Union[gf.gf.WaveformParameters, gf.ReturnVariables]
+        ] = None,
+        output_variables : List[
+            Union[gf.gf.WaveformParameters, gf.ReturnVariables]
+        ] = None
     ):
     
     # Set defaults here as if initilised as default arguments objects are global
@@ -202,7 +214,8 @@ def data(
                 
         # Whiten data: 
         if (gf.ReturnVariables.WHITENED_ONSOURCE in variables_to_return) or \
-            (gf.ReturnVariables.ROLLING_PEARSON_ONSOURCE in variables_to_return):
+        (gf.ReturnVariables.ROLLING_PEARSON_ONSOURCE in variables_to_return) \
+        or (gf.ReturnVariables.SPECTROGRAM_ONSOURCE in variables_to_return):
             
             whitened_onsource = gf.whiten(
                 onsource, 
@@ -226,7 +239,10 @@ def data(
                 f"NaN detected in whitened_onsource after cast."
             )
             
-            if (gf.ReturnVariables.ROLLING_PEARSON_ONSOURCE in variables_to_return):
+            if (
+                gf.ReturnVariables.ROLLING_PEARSON_ONSOURCE \
+                in variables_to_return
+            ):
                 max_arival_time_difference_seconds: float = \
                     get_max_arrival_time_difference(injection_generators)
                 
@@ -238,12 +254,21 @@ def data(
             else:
                 rolling_pearson_onsource = None
                 
+            if (gf.ReturnVariables.SPECTROGRAM_ONSOURCE in variables_to_return):
+
+                spectrogram_onsource = gf.spectrogram(whitened_onsource)
+            else:
+                spectrogram_onsource = None
+                
             whitened_onsource = tf.cast(whitened_onsource, tf.float16)
-            whitened_onsource = gf.replace_nan_and_inf_with_zero(whitened_onsource)
+            whitened_onsource = gf.replace_nan_and_inf_with_zero(
+                whitened_onsource
+            )
 
         else:
             whitened_onsource = None
             rolling_pearson_onsource = None
+            spectrogram_onsource = None
         
         if gf.ReturnVariables.ONSOURCE in variables_to_return:
             # Crop to remove edge effects, crop with or without whitening to
@@ -276,6 +301,7 @@ def data(
                 whitened_injections,
                 mask,
                 rolling_pearson_onsource,
+                spectrogram_onsource,
                 parameters
             ) for var_list in [input_variables, output_variables]
         ]
@@ -292,6 +318,7 @@ def create_variable_dictionary(
     whitened_injections : tf.Tensor,
     mask : tf.Tensor,
     rolling_pearson_onsource : tf.Tensor,
+    spectrogram_onsource : tf.Tensor,
     injection_parameters : Dict
     ) -> Dict:
 
@@ -303,15 +330,22 @@ def create_variable_dictionary(
         gf.ReturnVariables.INJECTIONS: injections,
         gf.ReturnVariables.WHITENED_INJECTIONS: whitened_injections,
         gf.ReturnVariables.INJECTION_MASKS: mask,
-        gf.ReturnVariables.ROLLING_PEARSON_ONSOURCE: rolling_pearson_onsource
+        gf.ReturnVariables.ROLLING_PEARSON_ONSOURCE: rolling_pearson_onsource,
+        gf.ReturnVariables.SPECTROGRAM_ONSOURCE: spectrogram_onsource
     }
 
     # Extend operations with any relevant keys from injection_parameters
     operations.update(
-        {key: value for key, value in injection_parameters.items() if key in return_variables}
+        {
+            key: value for key, value in injection_parameters.items() \
+            if key in return_variables
+        }
     )
 
-    return {key.name: operations[key] for key in return_variables if key in operations}
+    return {
+        key.name: operations[key] for key in return_variables \
+        if key in operations
+    }
 
 def Dataset(
         seed: int = 1000,
@@ -322,7 +356,9 @@ def Dataset(
         scale_factor: float = 1.0E21,
         noise_obtainer: gf.NoiseObtainer = None,
         group : str = "train",
-        injection_generators: List[Union[gf.cuPhenomDGenerator, gf.WNBGenerator]] = None,
+        injection_generators: List[
+            Union[gf.cuPhenomDGenerator, gf.WNBGenerator]
+        ] = None,
         num_examples_per_generation_batch: int = 2048,
         num_examples_per_batch: int = 1,
         input_variables: List = None,
@@ -429,13 +465,14 @@ def Dataset(
             )
         per_injection_shape = (
             num_injection_configs, num_examples_per_batch
-        )
-        
+        )        
         pearson_shape = (
             num_examples_per_batch, 
             num_detectors * (num_detectors - 1) // 2,
-            max_arival_time_difference_samples
+            2*max_arival_time_difference_samples
         )
+        
+    spectrogram_shape = gf.spectrogram_shape(onsource_shape)
     
     output_signature_dict = {
         gf.ReturnVariables.ONSOURCE.name:
@@ -472,7 +509,12 @@ def Dataset(
             tf.TensorSpec(
                 shape=pearson_shape,
                 dtype=tf.float32
-            ),   
+            ), 
+        gf.ReturnVariables.SPECTROGRAM_ONSOURCE.name: 
+            tf.TensorSpec(
+                shape=spectrogram_shape, 
+                dtype=tf.float32
+            ),
         gf.ReturnVariables.INJECTION_MASKS.name: 
             tf.TensorSpec(
                 shape=per_injection_shape, 
@@ -495,8 +537,12 @@ def Dataset(
         }
 
         parameters_to_return -= keys_to_remove
-        input_variables = [item for item in input_variables if item not in keys_to_remove]
-        output_variables = [item for item in output_variables if item not in keys_to_remove]
+        input_variables = [
+            item for item in input_variables if item not in keys_to_remove
+        ]
+        output_variables = [
+            item for item in output_variables if item not in keys_to_remove
+        ]
     
     output_signature_dict.update({
         item.name: tf.TensorSpec(
@@ -568,7 +614,9 @@ def extract_data_from_indicies(
                         
             out_element = \
             {
-                key: value[0][in_batch_index[0]] for key, value in out_dict.items()
+                key: value[0][
+                    in_batch_index[0]
+                ] for key, value in out_dict.items()
             }
                         
             for key, value in out_element.items():

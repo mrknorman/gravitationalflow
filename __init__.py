@@ -3,6 +3,7 @@ from .setup import *
 from .psd import psd
 from .snr import snr, scale_to_snr
 from .wnb import wnb
+from .conditioning import spectrogram, spectrogram_shape
 from .model import *
 from .cuphenom.python.cuphenom import imrphenomd
 from .whiten import whiten
@@ -14,3 +15,4 @@ from .injection import *
 from .dataset import *
 from .plotting import *
 from .validate import *
+from .glitch import GlitchType, get_glitch_times, get_glitch_segments
