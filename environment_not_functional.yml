@@ -1,11 +1,11 @@
-name: gravyflow-212
+name: gravyflow2
 channels:
   - conda-forge
   - defaults
 dependencies:
   - python=3.10
   - pip
-  - cudatoolkit=11.8.0
+  - scipy
   - gwdatafind
   - gwpy
   - python-lalframe
@@ -15,7 +15,9 @@ dependencies:
   - sqlalchemy
   - ipykernel
   - python-prctl
+  - psycopg2
+  - h5py
+  - astropy
   - pip:
-      - nvidia-cudnn-cu11==8.6.0.163
-      - tensorflow==2.12.*
-      - tensorflow-probability==0.20.*
+      - tensorflow[and-cuda]==2.14.*
+      - tensorflow-probability==0.22.*
