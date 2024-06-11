@@ -18,7 +18,7 @@ The `--recurse-submodules` option ensures that the cuPhenom submodule and its su
 To compile the cuPhenom library, navigate to the cuPhenom submodule directory:
 
 ```bash
-cd gravyflow/cuphenom
+cd gravyflow/gravyflow/cuphenom
 ```
 
 Ensure the CUDA C++ compiler (`nvcc`) and associated CUDA libraries are accessible by updating your PATH variable:
@@ -44,7 +44,7 @@ cd -
 It is recommended to install GravyFlow within a new conda environment. GravyFlow requires Python 3.10:
 
 ```bash
-conda env create --name gravyflow
+conda create --name gravyflow
 conda activate gravyflow
 ```
 
