@@ -11,6 +11,27 @@ def to_ctypes(to_convert):
 def ensure_list(item):
     return item if isinstance(item, (list, tuple, set, np.ndarray)) else [item]
 
+from ctypes.util import find_library
+
+cuda_bin_path = '/usr/local/cuda/bin'
+os.environ['PATH'] = f"{cuda_bin_path}:{os.environ.get('PATH', '')}"
+
+cuda_lib_path = '/usr/local/cuda/lib64'
+os.environ['LD_LIBRARY_PATH'] = f"{cuda_lib_path}:{os.environ.get('LD_LIBRARY_PATH', '')}"
+
+# In some ipython notebook environments Python fails to see these libraries unless explicitly loaded,
+# this is very weird, and might have something to do with the LD_LIBRARY_PATH variable, however,
+# setting this value does not help.
+try:
+    libc = CDLL("/usr/local/cuda/lib64/libcurand.so.10")   
+except:
+    pass
+
+try:
+    libc = CDLL("/usr/local/cuda/lib64/libcufft.so.11")   
+except:
+    pass
+
 # Load the library
 current_dir = os.path.dirname(os.path.realpath(__file__))
 lib = CDLL(f'{current_dir}/libphenom.so')
