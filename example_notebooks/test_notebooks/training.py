@@ -1,15 +1,69 @@
 # Built-in imports
-from typing import List, Dict
 import os
 
 # Dependency imports: 
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, Dense, Flatten, Dropout, ELU
-from tensorflow.keras.models import Model
+from tensorflow.keras.models import Model 
 
 # Import the GravyFlow module.
 import gravyflow as gf
+
+import os
+import time
+import psutil
+import tensorflow as tf
+
+class MemoryUsageCallback(tf.keras.callbacks.Callback):
+    def __init__(self, log_file="memory_usage.csv", log_freq_batches=50):
+        """
+        Args:
+            log_file (str): Path to the CSV log file.
+            log_freq_batches (int): Log memory usage every N training/validation batches.
+        """
+        super(MemoryUsageCallback, self).__init__()
+        self.log_file = log_file
+        self.log_freq_batches = log_freq_batches
+        self.process = psutil.Process(os.getpid())
+        
+        # Write CSV header
+        with open(self.log_file, "w") as f:
+            f.write("timestamp,phase,epoch,batch,cpu_memory_MB,gpu_memory_MB\n")
+    
+    def _get_gpu_memory_mb(self):
+        """Attempt to retrieve GPU memory usage (in MB) for the first GPU."""
+        try:
+            gpus = tf.config.list_physical_devices("GPU")
+            if gpus:
+                # tf.config.experimental.get_memory_info returns a dict with keys "current" (in bytes)
+                gpu_info = tf.config.experimental.get_memory_info(gpus[0].name)
+                return gpu_info.get("current", 0) / (1024 * 1024)
+        except Exception as e:
+            # If there's any issue, return -1 or a placeholder value.
+            return -1
+        return -1
+
+    def _log_memory(self, phase, epoch, batch):
+        timestamp = time.time()
+        cpu_memory = self.process.memory_info().rss / (1024 * 1024)  # in MB
+        gpu_memory = self._get_gpu_memory_mb()
+        with open(self.log_file, "a") as f:
+            f.write(f"{timestamp},{phase},{epoch},{batch},{cpu_memory:.2f},{gpu_memory:.2f}\n")
+
+    def on_train_batch_end(self, batch, logs=None):
+        # Log every N batches during training
+        if (batch + 1) % self.log_freq_batches == 0:
+            self._log_memory("train", self.params.get("epoch", -1), batch)
+
+    def on_test_batch_end(self, batch, logs=None):
+        # Log every N batches during validation (or testing)
+        if (batch + 1) % self.log_freq_batches == 0:
+            self._log_memory("validation", self.params.get("epoch", -1), batch)
+
+    def on_epoch_end(self, epoch, logs=None):
+        # Log at the end of each epoch (use batch = -1 as a placeholder)
+        self._log_memory("epoch_end", epoch, -1)
 
 log_dir = 'logs/profile'
 if not os.path.exists(log_dir):
@@ -19,12 +73,6 @@ tensorboard_callback = tf.keras.callbacks.TensorBoard(
     log_dir=log_dir,
     histogram_freq=1,
     profile_batch = '500,520'
-)
-
-
-# Set up the environment using gf.env() and return a tf.distribute.Strategy object.
-env : tf.distribute.Strategy = gf.env(
-	memory_to_allocate_tf=8000
 )
 
 def create_gabbard(
@@ -77,7 +125,7 @@ def adjust_features(features, labels):
     labels['INJECTION_MASKS'] = labels['INJECTION_MASKS'][0]
     return features, labels
 
-with env:
+with gf.env(memory_to_allocate_tf=8000):
     # This object will be used to obtain real interferometer data based on specified parameters.
     ifo_data_obtainer : gf.IFODataObtainer = gf.IFODataObtainer(
         observing_runs=gf.ObservingRun.O3, # Specify the observing run (e.g., O3).
@@ -195,17 +243,22 @@ with env:
         metrics=['accuracy']
     )
 
-    examples_per_epoch : int = int(1E56)
+    examples_per_epoch : int = int(1E5)
     num_validation_examples : int = int(1E4)
     num_testing_examples : int = int(1E4)
-    
+
+    validation_steps = num_validation_examples // gf.Defaults.num_examples_per_batch
+    steps_per_epoch = examples_per_epoch // gf.Defaults.num_examples_per_batch
+
+    memory_callback = MemoryUsageCallback(log_file="memory_usage.csv", log_freq_batches=50)
+
     history = model.fit(
         training_dataset,
         epochs=10,  # Number of epochs to train for
-        steps_per_epoch=examples_per_epoch // gf.Defaults.num_examples_per_batch,
+        steps_per_epoch=steps_per_epoch,
         validation_data=validation_dataset,
-        validation_steps=num_validation_examples // gf.Defaults.num_examples_per_batch, #Ensure this is set as dataset is uncapped
-        callbacks=[tensorboard_callback]
+        validation_steps=validation_steps, #Ensure this is set as dataset is uncapped
+        callbacks=[tensorboard_callback, memory_callback]
     )
 
     model.evaluate(
